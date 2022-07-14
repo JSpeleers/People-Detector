@@ -80,11 +80,13 @@ def person_checker(file_name, save_directory, yolo='yolov4', nth_frame=10, confi
             break
 
         is_person_found = 'person' in labels
-        print('Person detected' if is_person_found else 'No person detected')
+        print(('Person detected' if is_person_found else 'No person detected')
+              + f' in frame {frame_number}/{frame_count}')
         if is_person_found:
             break
 
     # Person detected or went through all frames without person detected
+    image_path = ''
     if not no_images:
         # create image with bboxes showing people and then save
         marked_frame = cvlib.object_detection.draw_bbox(frame, bbox, labels, conf, write_conf=True)
@@ -93,28 +95,30 @@ def person_checker(file_name, save_directory, yolo='yolov4', nth_frame=10, confi
         image_dir = save_directory + '/' + person_found_dir
         if not os.path.isdir(image_dir):
             os.mkdir(image_dir)
-        save_file_name = os.path.basename(file_name) + '.jpg'
+        save_file_name = f'{os.path.basename(file_name)}.{working_on_counter}.jpg'
         image_path = image_dir + '/' + save_file_name
         cv2.imwrite(image_path, marked_frame)
         print(f'Wrote debug image to {image_path}')
+
+    detection[is_person_found].append((file_name, image_path))
 
     return is_person_found, analyze_error
 
 
 # takes a directory and returns all files and directories within
-def list_dir(dir_name):
-    list_of_files = os.listdir(dir_name)
+def list_dir(dir_name, img_only=False, vid_only=False):
     all_files = list()
     # Iterate over all the entries
-    for entry in list_of_files:
+    for entry in os.listdir(dir_name):
         # ignore hidden files and directories
         if entry[0] != '.':
             # Create full path
             full_path = os.path.join(dir_name, entry)
-            # If entry is a directory then get the list of files in this directory 
+            # If entry is a directory then get the list of files in this directory
             if os.path.isdir(full_path):
                 all_files = all_files + list_dir(full_path)
-            else:
+            # only add video file if not img_only, only add image file if not vid_only
+            elif (is_video(full_path) and not img_only) or (is_image(full_path) and not vid_only):
                 all_files.append(full_path)
     return all_files
 
@@ -125,10 +129,6 @@ def human_size(file_bytes, units=[' bytes', 'KB', 'MB', 'GB', 'TB', 'PB', 'EB'])
 
 
 if __name__ == "__main__":
-
-    sys.setrecursionlimit(100000)
-    threading.stack_size(200000000)
-
     parser = ArgumentParser()
     parser.add_argument('-d', '--directory', default='', help='Path to video folder')
     parser.add_argument('-f', default='', help='Used to select an individual file')
@@ -141,7 +141,9 @@ if __name__ == "__main__":
                         help='Attempt to run on GPU instead of CPU. Requires Open CV compiled with CUDA enables and Nvidia drivers set up correctly.')
     parser.add_argument('--no-images', action='store_true',
                         help='Do not create images/frames of detected people.')
-    parser.add_argument('--debug-amount', type=int, default=-1, help='Only examine first n files')
+    parser.add_argument('--debug-amount', type=int, default=-1, help='Only examine first n files.')
+    parser.add_argument('--img-only', action='store_true', help='Only examine image files.')
+    parser.add_argument('--vid-only', action='store_true', help='Only examine video files.')
 
     args = vars(parser.parse_args())
 
@@ -177,19 +179,23 @@ if __name__ == "__main__":
     print('Not creating debug images' if args['no_images'] else 'Creating debug images')
     print(f"Debug amount is set to {args['debug_amount']}")
     print(f"GPU is set to {args['gpu']}")
-    print('\n\n')
-
-    total_bytes = 0
-    bytes_to_delete = 0
+    print('\n')
 
     # open a log file and loop over all our video files
     if args['f'] == '':
-        media_directory_list = list_dir(args['directory'] + '/')
+        media_directory_list = list_dir(args['directory'] + '/', img_only=args['img_only'], vid_only=args['vid_only'])
     else:
         media_directory_list = [args['f']]
 
     # what file we are on
     working_on_counter = 1
+
+    # bytes counters
+    total_bytes = 0
+    bytes_to_delete = 0
+
+    # file dictionary
+    detection = {True: [], False: []}
 
     for media_file in media_directory_list:
         media_file_size = os.path.getsize(media_file)
@@ -208,10 +214,19 @@ if __name__ == "__main__":
         if error_detected:
             print(f'\nError in analyzing {media_file}')
 
-        working_on_counter += 1
-
         if working_on_counter == args['debug_amount']:
             print(f'Debug amount of {working_on_counter} files reached')
             break
 
-    print(f'Total file size without people detected: {human_size(bytes_to_delete)}/{human_size(total_bytes)}')
+        working_on_counter += 1
+        print('\n')
+
+    print(f'Total file size without people detected: {human_size(bytes_to_delete)}/{human_size(total_bytes)}\n')
+    print('Next action:\n\t[0] do nothing'
+          '\n\t[1] delete all files with a person detected'
+          '\n\t[2] delete all files with a person detected and still in debug dir'
+          '\n\t[3] delete all files with no person detected'
+          '\n\t[4] delete all files with no person detected and still in debug dir')
+    action = input('> ')
+    print(f'Chosen action {action}')
+
